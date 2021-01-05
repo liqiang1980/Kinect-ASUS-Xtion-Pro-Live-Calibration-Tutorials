@@ -3,6 +3,7 @@
 
 import rospy
 import cv2
+import math
 
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
@@ -12,21 +13,22 @@ import yaml
 import sys
 from matplotlib import pyplot as plt
 
+
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-depth_stream = open("/home/chentao/kinect_calibration/depth_1504270110.yaml", "r")
+depth_stream = open("/home/qiang/SWLib/xtion_calib_tutorial/kinect_calibration/depth_1504270110.yaml", "r")
 depth_doc = yaml.load(depth_stream)
 depth_mtx = np.array(depth_doc['camera_matrix']['data']).reshape(3,3)
 depth_dist = np.array(depth_doc['distortion_coefficients']['data'])
 depth_stream.close()
 
-rgb_stream = open("/home/chentao/kinect_calibration/rgb_1504270110.yaml", "r")
+rgb_stream = open("/home/qiang/SWLib/xtion_calib_tutorial/kinect_calibration/rgb_1504270110.yaml", "r")
 rgb_doc = yaml.load(rgb_stream)
 rgb_mtx = np.array(rgb_doc['camera_matrix']['data']).reshape(3,3)
 rgb_dist = np.array(rgb_doc['distortion_coefficients']['data'])
 rgb_stream.close()
 
 
-width = 0.0348
+width = 0.025
 delta_x = 0   #0.0824
 delta_y = 0   #0.064
 x_num = 8
@@ -47,6 +49,29 @@ class camera:
         self.rgb_tvec = None
         self.ir_rmat = None
         self.ir_tvec = None
+        
+    def isclose(x, y, rtol=1.e-5, atol=1.e-8):
+        return bool(abs(x-y) <= atol + rtol * abs(y))
+
+    def euler_angles_from_rotation_matrix(self, R):
+        '''
+        From a paper by Gregory G. Slabaugh (undated),
+        "Computing Euler angles from a rotation matrix
+        '''
+        phi = 0.0
+        #if self.isclose(R[2,0],-1.0):
+            #theta = math.pi/2.0
+            #psi = math.atan2(R[0,1],R[0,2])
+        #elif self.isclose(R[2,0],1.0):
+            #theta = -math.pi/2.0
+            #psi = math.atan2(-R[0,1],-R[0,2])
+        #else:
+        theta = -math.asin(R[2,0])
+        cos_theta = math.cos(theta)
+        psi = math.atan2(R[2,1]/cos_theta, R[2,2]/cos_theta)
+        phi = math.atan2(R[1,0]/cos_theta, R[0,0]/cos_theta)
+        return psi, theta, phi
+
 
     def ir_callback(self,data):
     	try:
@@ -82,7 +107,7 @@ class camera:
             print("===camera tvec:")
             print(-np.dot(self.ir_rmat.T, self.ir_tvec))
 
-            depth_stream = open("/home/chentao/kinect_calibration/ir_camera_pose.yaml", "w")
+            depth_stream = open("/home/qiang/SWLib/xtion_calib_tutorial/kinect_calibration/ir_camera_pose.yaml", "w")
             data = {'rmat':self.ir_rmat.tolist(), 'tvec':self.ir_tvec.tolist()}
             yaml.dump(data, depth_stream)
 
@@ -105,13 +130,18 @@ class camera:
             rgb_tempimg = self.rgb_img.copy()
             cv2.cornerSubPix(gray,rgb_corners,(5,5),(-1,-1),criteria)            
             cv2.drawChessboardCorners(rgb_tempimg, (x_num,y_num), rgb_corners,rgb_ret)
-            rgb_rvec, self.rgb_tvec, rgb_inliers = cv2.solvePnPRansac(objpoints, rgb_corners, rgb_mtx, rgb_dist)
+            _,rgb_rvec, self.rgb_tvec, rgb_inliers = cv2.solvePnPRansac(objpoints, rgb_corners, rgb_mtx, rgb_dist)
             self.rgb_rmat, _ = cv2.Rodrigues(rgb_rvec)
             print("The world coordinate system's origin in camera's coordinate system:")
             print("===rgb_camera rvec:")
             print(rgb_rvec)
             print("===rgb_camera rmat:")
             print(self.rgb_rmat)
+            type(self.rgb_rmat)
+            psi, theta, phi = self.euler_angles_from_rotation_matrix(self.rgb_rmat)
+            
+            print("===rgb_camera rpy: %f,%f,%f", psi, theta, phi)
+            
             print("===rgb_camera tvec:")
             print(self.rgb_tvec)
             print("rgb_camera_shape: ")
@@ -123,7 +153,7 @@ class camera:
             print("===camera tvec:")
             print(-np.dot(self.rgb_rmat.T, self.rgb_tvec))
 
-            rgb_stream = open("/home/chentao/kinect_calibration/rgb_camera_pose.yaml", "w")
+            rgb_stream = open("/home/qiang/SWLib/xtion_calib_tutorial/kinect_calibration/rgb_camera_pose.yaml", "w")
             data = {'rmat':self.rgb_rmat.tolist(), 'tvec':self.rgb_tvec.tolist()}
             yaml.dump(data, rgb_stream)
 
